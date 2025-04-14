@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 340 90% 60%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 252 90% 73%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 340 90% 60%;
+    --radius: 1rem;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 340 90% 60%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 252 90% 73%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 340 90% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  .wedding-card {
+    @apply bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-md;
+  }
+
+  .wedding-gradient-text {
+    @apply text-transparent bg-clip-text bg-wedding-gradient font-bold;
+  }
+
+  .wedding-button {
+    @apply bg-wedding-500 hover:bg-wedding-600 text-white rounded-full transition-all duration-300 shadow-md hover:shadow-glow;
+  }
+
+  .wedding-button-secondary {
+    @apply bg-lavender-500 hover:bg-lavender-600 text-white rounded-full transition-all duration-300 shadow-md hover:shadow-glow-lavender;
+  }
+
+  .wedding-button-accent {
+    @apply bg-mint-500 hover:bg-mint-600 text-white rounded-full transition-all duration-300 shadow-md hover:shadow-glow-mint;
+  }
+
+  .wedding-button-gold {
+    @apply bg-gold-500 hover:bg-gold-600 text-white rounded-full transition-all duration-300 shadow-md hover:shadow-glow-gold;
+  }
+
+  .wedding-button-outline {
+    @apply border-2 border-wedding-500 text-wedding-500 hover:bg-wedding-100 rounded-full transition-all duration-300;
+  }
+
+  .wedding-input {
+    @apply rounded-xl border-gray-200 focus:border-wedding-300 focus:ring focus:ring-wedding-200 focus:ring-opacity-50 transition-all duration-300;
+  }
+
+  .wedding-badge {
+    @apply rounded-full px-3 py-1 text-xs font-medium;
+  }
+
+  .wedding-badge-primary {
+    @apply bg-wedding-100 text-wedding-700;
+  }
+
+  .wedding-badge-secondary {
+    @apply bg-lavender-100 text-lavender-700;
+  }
+
+  .wedding-badge-success {
+    @apply bg-mint-100 text-mint-700;
+  }
+
+  .wedding-badge-gold {
+    @apply bg-gold-100 text-gold-700;
+  }
+
+  .step-active {
+    @apply bg-wedding-500 text-white border-wedding-500;
+  }
+
+  .step-completed {
+    @apply bg-mint-500 text-white border-mint-500;
+  }
+
+  .step-pending {
+    @apply bg-white text-gray-400 border-gray-200;
+  }
+
+  .shimmer {
+    @apply relative overflow-hidden before:absolute before:inset-0 before:w-full before:h-full before:bg-shimmer before:animate-shimmer;
+  }
+}
