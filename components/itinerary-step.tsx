@@ -1,354 +1,340 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useWorkflow } from "@/context/workflow-context"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PlusCircle, Trash2 } from "lucide-react"
-
-// Define a type for the itinerary
-interface ItineraryItem {
-  id: string
-  driverId: string
-  pickupLocation: string
-  pickupTime: string
-  guests: {
-    name: string
-    numberOfGuests: number
-  }[]
-  totalGuests: number
-}
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 export const ItineraryStep = () => {
-  const { csvData, setCurrentStep, locationTimings, driverCapacity, drivers, setDrivers } = useWorkflow()
+  const { 
+    csvData, 
+    setCurrentStep, 
+    locationTimings, 
+    setLocationTimings,
+    drivers, 
+    setDrivers, 
+    itinerary,
+    setItinerary, 
+    selectedCsvFile
+  } = useWorkflow()
 
-  const [itinerary, setItinerary] = useState<ItineraryItem[]>([])
-  const [newDriver, setNewDriver] = useState({ name: "", phone: "", vehicleCapacity: driverCapacity.maxPassengers })
+  const defaultNewDriverCapacity = 4;
+  const [newDriver, setNewDriver] = useState({ name: "", phone: "", vehicleCapacity: defaultNewDriverCapacity })
   const [isGenerating, setIsGenerating] = useState(false)
+  const [editingDriver, setEditingDriver] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState("locations")
 
-  // Function to add a new driver
-  const addDriver = () => {
-    if (newDriver.name && newDriver.phone) {
-      const newDriverWithId = {
-        ...newDriver,
-        id: `driver-${Date.now()}`,
-        vehicleCapacity: Number.parseInt(newDriver.vehicleCapacity.toString()) || driverCapacity.maxPassengers,
+  useEffect(() => {
+    if (csvData && csvData.length > 0 && locationTimings.length === 0) {
+      const locations = [...new Set(csvData.map((guest) => guest.pickupLocation))]
+        .filter(location => location && location.trim() !== '')
+      
+      if (locations.length > 0) {
+         setLocationTimings(
+           locations.map((location) => ({
+             location,
+             roundTripMinutes: 60,
+           })),
+         )
       }
+    }
+  }, [csvData, locationTimings.length, setLocationTimings])
 
-      setDrivers([...drivers, newDriverWithId])
-      setNewDriver({ name: "", phone: "", vehicleCapacity: driverCapacity.maxPassengers })
+  const handleTimeChange = (location: string, minutes: number) => {
+    setLocationTimings(
+      locationTimings.map((timing) =>
+        timing.location === location ? { ...timing, roundTripMinutes: minutes } : timing,
+      ),
+    )
+  }
+
+  const updateDriver = (driverId: string, updates: Partial<Omit<typeof newDriver, 'vehicleCapacity'> & { vehicleCapacity?: number | string }>) => {
+    const capacityUpdate = updates.vehicleCapacity !== undefined
+      ? { vehicleCapacity: Math.max(1, Number(updates.vehicleCapacity) || 1) }
+      : {};
+
+    setDrivers(drivers.map(driver =>
+      driver.id === driverId
+        ? { 
+            ...driver, 
+            name: updates.name ?? driver.name,
+            phone: updates.phone ?? driver.phone,
+            ...capacityUpdate
+          }
+        : driver
+    ))
+    if (updates.name !== undefined || updates.phone !== undefined) {
+        setEditingDriver(null)
     }
   }
 
-  // Function to remove a driver
+  const addDriver = () => {
+     if (newDriver.name && newDriver.phone) {
+       const newDriverWithId = {
+         ...newDriver,
+         id: `driver-${Date.now()}`,
+         vehicleCapacity: Math.max(1, Number(newDriver.vehicleCapacity) || 1),
+       }
+       setDrivers([...drivers, newDriverWithId])
+       setNewDriver({ name: "", phone: "", vehicleCapacity: defaultNewDriverCapacity })
+     }
+   }
+
   const removeDriver = (id: string) => {
-    setDrivers(drivers.filter((driver) => driver.id !== id))
-  }
+     setDrivers(drivers.filter((driver) => driver.id !== id))
+   }
 
-  // Function to generate the itinerary
   const generateItinerary = () => {
+    if (!selectedCsvFile) {
+      console.error("No CSV file selected to generate itinerary for.");
+      // TODO: Add user-facing error handling (e.g., a toast notification)
+      return;
+    }
     setIsGenerating(true)
-
-    // Simulate a loading state
     setTimeout(() => {
-      // This is a simplified algorithm for demonstration
-      // In a real application, you would need a more sophisticated algorithm
-
-      // Group guests by pickup location
       const guestsByLocation: Record<string, typeof csvData> = {}
-
       csvData.forEach((guest) => {
-        if (!guestsByLocation[guest.pickupLocation]) {
-          guestsByLocation[guest.pickupLocation] = []
+        const location = guest.pickupLocation || "Unknown Location";
+        if (!guestsByLocation[location]) {
+          guestsByLocation[location] = []
         }
-        guestsByLocation[guest.pickupLocation].push(guest)
+        guestsByLocation[location].push(guest)
       })
+       const sortedLocations = Object.keys(guestsByLocation).sort((a, b) => {
+         const timeA = locationTimings.find(t => t.location === a)?.roundTripMinutes || 0;
+         const timeB = locationTimings.find(t => t.location === b)?.roundTripMinutes || 0;
+         return timeB - timeA; 
+       });
 
-      // Sort locations by round trip time (descending)
-      const sortedLocations = locationTimings
-        .sort((a, b) => b.roundTripMinutes - a.roundTripMinutes)
-        .map((timing) => timing.location)
-
-      // Generate itinerary items
-      const newItinerary: ItineraryItem[] = []
+      const newItinerary: any[] = []
       let currentDriverIndex = 0
 
       sortedLocations.forEach((location) => {
+         if (location === "Unknown Location") {
+           console.warn("Skipping itinerary generation for guests with Unknown Location");
+           return; 
+         }
         const guests = guestsByLocation[location] || []
         const remainingGuests = [...guests]
-
         while (remainingGuests.length > 0) {
-          // If we have drivers
           if (drivers.length > 0) {
             const driver = drivers[currentDriverIndex % drivers.length]
             currentDriverIndex++
-
-            // Calculate how many guests this driver can take
             let currentCapacity = driver.vehicleCapacity
             const assignedGuests: typeof remainingGuests = []
-
-            // Assign guests to this driver until capacity is reached
             while (currentCapacity > 0 && remainingGuests.length > 0) {
               const guest = remainingGuests[0]
-              const guestCount = Number.parseInt(guest.numberOfGuests.toString()) || 1
-
+              const guestCount = Number.parseInt(guest.numberOfGuests?.toString()) || 1
               if (guestCount <= currentCapacity) {
                 assignedGuests.push(guest)
                 currentCapacity -= guestCount
                 remainingGuests.shift()
               } else {
-                // If this guest has too many people, skip for now
-                // In a real app, you might want to split the group
                 break
               }
             }
-
             if (assignedGuests.length > 0) {
-              // Calculate total guests
-              const totalGuests = assignedGuests.reduce(
-                (sum, guest) => sum + (Number.parseInt(guest.numberOfGuests.toString()) || 1),
-                0,
-              )
-
-              // Create an itinerary item
+              const totalGuests = assignedGuests.reduce( (sum, guest) => sum + (Number.parseInt(guest.numberOfGuests?.toString()) || 1), 0 )
+               const firstGuest = assignedGuests[0];
+               const arrivalDate = firstGuest?.arrivalDate || "Date Pending";
+               const arrivalTime = firstGuest?.arrivalTime || "Time Pending";
+               // Generate a stable ID for itinerary items if needed for future updates
+               const itineraryItemId = `itinerary-${driver.id}-${location}-${arrivalTime}`.replace(/[^a-zA-Z0-9-_]/g, '');
               newItinerary.push({
-                id: `itinerary-${Date.now()}-${Math.random()}`,
+                id: itineraryItemId, // Use a more stable ID
                 driverId: driver.id,
                 pickupLocation: location,
-                pickupTime: assignedGuests[0].arrivalTime, // Simplified
-                guests: assignedGuests.map((g) => ({
-                  name: g.name,
-                  numberOfGuests: Number.parseInt(g.numberOfGuests.toString()) || 1,
-                })),
+                 pickupTime: arrivalTime, 
+                 arrivalDate: arrivalDate, 
+                 guests: assignedGuests.map((g) => ({
+                   name: g.name,
+                   numberOfGuests: Number.parseInt(g.numberOfGuests?.toString()) || 1,
+                   arrivalDate: g.arrivalDate, 
+                   arrivalTime: g.arrivalTime,
+                 })),
                 totalGuests,
               })
             }
-          } else {
-            // If no drivers, create placeholder itinerary items
-            const guest = remainingGuests[0]
-            newItinerary.push({
-              id: `itinerary-${Date.now()}-${Math.random()}`,
-              driverId: "placeholder",
-              pickupLocation: location,
-              pickupTime: guest.arrivalTime,
-              guests: [
-                {
-                  name: guest.name,
-                  numberOfGuests: Number.parseInt(guest.numberOfGuests.toString()) || 1,
-                },
-              ],
-              totalGuests: Number.parseInt(guest.numberOfGuests.toString()) || 1,
-            })
-            remainingGuests.shift()
-          }
+           } else {
+             // Handle case with no drivers (if necessary based on requirements)
+             // For now, assuming drivers are required to generate itinerary
+             console.warn("No drivers available to assign guests.");
+             // Optionally break or handle this case differently
+             break; // Exit loop for this location if no drivers
+           }
         }
       })
 
+      // --- Persistence Logic --- 
+      try {
+        const savedState = {
+          csvData,
+          locationTimings,
+          drivers,
+          itinerary: newItinerary
+        };
+        localStorage.setItem(`weddingPickup_${selectedCsvFile}`, JSON.stringify(savedState));
+        
+        // Update the list of saved CSVs
+        const savedCsvListKey = 'weddingPickup_savedCsvs';
+        const savedCsvs = JSON.parse(localStorage.getItem(savedCsvListKey) || '[]');
+        if (!savedCsvs.includes(selectedCsvFile)) {
+          savedCsvs.push(selectedCsvFile);
+          localStorage.setItem(savedCsvListKey, JSON.stringify(savedCsvs));
+        }
+        console.log(`State saved for ${selectedCsvFile}`);
+      } catch (error) {
+        console.error(`Failed to save state for ${selectedCsvFile} to localStorage:`, error);
+        // Handle potential storage errors (e.g., quota exceeded)
+        // TODO: Add user notification if saving fails
+      }
+      // --- End Persistence Logic --- 
+
       setItinerary(newItinerary)
       setIsGenerating(false)
+      setCurrentStep("view_itinerary") 
     }, 1500)
   }
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold text-primary">Itinerary Generation</CardTitle>
-          <CardDescription>Manage drivers and generate pickup itineraries</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Tabs defaultValue="drivers" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="drivers">Manage Drivers</TabsTrigger>
-              <TabsTrigger value="itinerary">View Itinerary</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="drivers" className="space-y-4">
-              <div className="mb-6 space-y-4">
-                <div>
-                  <h3 className="text-lg font-medium">Pickup Location Information</h3>
-                  <p className="text-sm text-muted-foreground">
-                    The following round-trip times will be used to calculate the itinerary:
+      <div className="animate-fade-in">
+        <Card className="wedding-card">
+          <CardHeader>
+            <CardTitle className="text-2xl font-bold text-primary">Configure Itinerary Settings</CardTitle>
+            <CardDescription>Set pickup location times and manage drivers before generating the itinerary.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="locations">Pickup Locations</TabsTrigger>
+                <TabsTrigger value="drivers">Manage Drivers</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="locations" className="mt-6">
+                <div className="space-y-4 rounded-md border p-4">
+                  <h3 className="text-lg font-medium mb-2">Pickup Location Information</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Estimated round-trip times (in minutes) from the venue.
                   </p>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    {locationTimings.map((timing, index) => (
-                      <div key={index} className="flex items-center justify-between rounded-md border p-2">
-                        <span>{timing.location}</span>
-                        <span className="font-medium">{timing.roundTripMinutes} minutes</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-lg font-medium">Driver Capacity</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Each driver can accommodate up to {driverCapacity.maxPassengers} passengers per trip.
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-md border p-4">
-                <h3 className="text-lg font-medium mb-4">Add Drivers</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <Label htmlFor="driver-name">Driver Name</Label>
-                    <Input
-                      id="driver-name"
-                      value={newDriver.name}
-                      onChange={(e) => setNewDriver({ ...newDriver, name: e.target.value })}
-                      placeholder="Enter driver name"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="driver-phone">Phone Number</Label>
-                    <Input
-                      id="driver-phone"
-                      value={newDriver.phone}
-                      onChange={(e) => setNewDriver({ ...newDriver, phone: e.target.value })}
-                      placeholder="Enter phone number"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="vehicle-capacity">Vehicle Capacity</Label>
-                    <Input
-                      id="vehicle-capacity"
-                      type="number"
-                      min="1"
-                      value={newDriver.vehicleCapacity}
-                      onChange={(e) =>
-                        setNewDriver({
-                          ...newDriver,
-                          vehicleCapacity: Number.parseInt(e.target.value) || driverCapacity.maxPassengers,
-                        })
-                      }
-                    />
-                  </div>
-                </div>
-                <Button className="mt-4" onClick={addDriver} disabled={!newDriver.name || !newDriver.phone}>
-                  <PlusCircle className="mr-2 h-4 w-4" />
-                  Add Driver
-                </Button>
-              </div>
-
-              <div className="rounded-md border">
-                <h3 className="text-lg font-medium p-4 border-b">Current Drivers</h3>
-                {drivers.length === 0 ? (
-                  <div className="p-4 text-center text-muted-foreground">
-                    No drivers added yet. Add drivers above to create an itinerary.
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Phone</TableHead>
-                        <TableHead>Vehicle Capacity</TableHead>
-                        <TableHead className="w-[100px]">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {drivers.map((driver) => (
-                        <TableRow key={driver.id}>
-                          <TableCell>{driver.name}</TableCell>
-                          <TableCell>{driver.phone}</TableCell>
-                          <TableCell>{driver.vehicleCapacity}</TableCell>
-                          <TableCell>
-                            <Button variant="ghost" size="icon" onClick={() => removeDriver(driver.id)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </div>
-
-              <div className="flex justify-center mt-6">
-                <Button onClick={generateItinerary} disabled={isGenerating} className="w-full max-w-md">
-                  {isGenerating ? "Generating..." : "Generate Itinerary"}
-                </Button>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="itinerary" className="space-y-4">
-              {itinerary.length === 0 ? (
-                <div className="rounded-md border p-8 text-center">
-                  <h3 className="text-lg font-medium mb-2">No Itinerary Generated Yet</h3>
-                  <p className="text-muted-foreground mb-4">
-                    Add drivers and generate an itinerary to see the pickup schedule.
-                  </p>
-                  <Button onClick={() => generateItinerary()} disabled={isGenerating}>
-                    {isGenerating ? "Generating..." : "Generate Itinerary"}
-                  </Button>
-                </div>
-              ) : (
-                <ScrollArea className="h-[500px] rounded-md border">
-                  <div className="p-4 space-y-6">
-                    {itinerary.map((item) => {
-                      const driver = drivers.find((d) => d.id === item.driverId) || {
-                        name: "Unassigned",
-                        phone: "N/A",
-                      }
-
-                      return (
-                        <Card key={item.id} className="overflow-hidden">
-                          <CardHeader className="bg-primary/10 py-3">
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <CardTitle className="text-lg">Pickup: {item.pickupLocation}</CardTitle>
-                                <CardDescription>
-                                  Time: {item.pickupTime} | Total Guests: {item.totalGuests}
-                                </CardDescription>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-medium">{driver.name}</p>
-                                <p className="text-sm text-muted-foreground">{driver.phone}</p>
-                              </div>
+                  {locationTimings.length > 0 ? (
+                    <ScrollArea className="h-60 pr-3">
+                      <div className="space-y-3">
+                        {locationTimings.map((timing, index) => (
+                          <div key={index} className="flex items-center justify-between gap-4 p-2 rounded hover:bg-gray-100 border-b last:border-b-0">
+                            <Label 
+                              htmlFor={`location-${index}`} 
+                              className="flex-1 font-semibold text-sm truncate text-primary cursor-pointer" 
+                              title={timing.location}
+                            >
+                              {timing.location}
+                            </Label>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                id={`time-${index}`}
+                                type="number"
+                                min="1"
+                                value={timing.roundTripMinutes}
+                                onChange={(e) => handleTimeChange(timing.location, Number.parseInt(e.target.value) || 0)}
+                                className="w-20 h-8 text-right transition-colors duration-200 focus:border-primary focus:ring-1 focus:ring-primary/50"
+                              />
+                              <span className="text-xs text-muted-foreground">min</span>
                             </div>
-                          </CardHeader>
-                          <CardContent className="p-0">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Guest Name</TableHead>
-                                  <TableHead className="text-right">Number of Guests</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {item.guests.map((guest, idx) => (
-                                  <TableRow key={idx}>
-                                    <TableCell>{guest.name}</TableCell>
-                                    <TableCell className="text-right">{guest.numberOfGuests}</TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </CardContent>
-                        </Card>
-                      )
-                    })}
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">No pickup locations found in guest data yet.</p>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="drivers" className="mt-6">
+                <div className="rounded-md border">
+                  <h3 className="text-lg font-medium p-4 border-b">Manage Drivers</h3>
+                  <div className="p-4 border-b space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto] gap-3 items-end">
+                      <div>
+                        <Label htmlFor="new-driver-name">Driver Name</Label>
+                        <Input id="new-driver-name" placeholder="Enter name" value={newDriver.name} onChange={(e) => setNewDriver({ ...newDriver, name: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label htmlFor="new-driver-phone">Phone Number</Label>
+                        <Input id="new-driver-phone" placeholder="Enter phone" value={newDriver.phone} onChange={(e) => setNewDriver({ ...newDriver, phone: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label htmlFor="new-driver-capacity">Capacity</Label>
+                        <Input id="new-driver-capacity" type="number" min="1" value={newDriver.vehicleCapacity} onChange={(e) => setNewDriver({ ...newDriver, vehicleCapacity: Math.max(1, Number(e.target.value) || 1) })} className="w-20" />
+                      </div>
+                      <Button onClick={addDriver} disabled={!newDriver.name || !newDriver.phone} size="sm" className="self-end">
+                        <PlusCircle className="mr-2 h-4 w-4" /> Add Driver
+                      </Button>
+                    </div>
                   </div>
-                </ScrollArea>
-              )}
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-        <CardFooter className="flex justify-between">
-          <Button variant="outline" onClick={() => setCurrentStep(1)}>
-            Back
-          </Button>
-          <Button onClick={() => setCurrentStep(3)} disabled={itinerary.length === 0}>
-            Continue to Communication
-          </Button>
-        </CardFooter>
-      </Card>
+
+                  {drivers.length === 0 ? (
+                    <div className="p-4 text-center text-muted-foreground">
+                      No drivers added yet. Add drivers above.
+                    </div>
+                  ) : (
+                    <ScrollArea className="h-60">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Phone</TableHead>
+                            <TableHead>Vehicle Capacity</TableHead>
+                            <TableHead className="w-[100px] text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {drivers.map((driver) => (
+                            <TableRow key={driver.id}>
+                              <TableCell className="font-medium">{driver.name}</TableCell>
+                              <TableCell>{driver.phone}</TableCell>
+                              <TableCell>{driver.vehicleCapacity}</TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex gap-1 justify-end">
+                                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => console.log('Edit driver:', driver.id)} > 
+                                    <span className="sr-only">Edit</span> 
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => removeDriver(driver.id)}> 
+                                    <span className="sr-only">Delete</span><Trash2 className="h-4 w-4" /> 
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+          <CardFooter className="flex justify-between border-t pt-4">
+            <Button variant="outline" onClick={() => setCurrentStep("review")}>
+              Back to Review
+            </Button>
+            <Button 
+              onClick={generateItinerary} 
+              disabled={isGenerating || drivers.length === 0 || locationTimings.length === 0}
+              className="min-w-[200px]"
+            >
+              {isGenerating ? "Generating..." : "Generate & View Itinerary"}
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
     </div>
   )
 }

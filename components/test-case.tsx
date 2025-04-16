@@ -3,18 +3,19 @@
 import { useState, useEffect } from "react"
 import { useWorkflow } from "@/context/workflow-context"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 // Sample CSV data for testing
 const sampleCsvData = [
+  // Test Case 1: Multiple pickups at same time, location (Airport 14:30)
   {
     name: "John Smith",
     email: "john@example.com",
     phone: "+1234567890",
     pickupLocation: "Airport",
-    arrivalDate: "2023-06-15",
+    arrivalDate: "2024-03-20",
     arrivalTime: "14:30",
     numberOfGuests: 2,
   },
@@ -23,37 +24,284 @@ const sampleCsvData = [
     email: "jane@example.com",
     phone: "+1987654321",
     pickupLocation: "Airport",
-    arrivalDate: "2023-06-15",
-    arrivalTime: "15:45",
-    numberOfGuests: 1,
-  },
-  {
-    name: "Bob Johnson",
-    email: "bob@example.com",
-    phone: "+1122334455",
-    pickupLocation: "Train Station",
-    arrivalDate: "2023-06-15",
-    arrivalTime: "16:30",
+    arrivalDate: "2024-03-20",
+    arrivalTime: "14:30",
     numberOfGuests: 3,
-  },
-  {
-    name: "Alice Williams",
-    email: "alice@example.com",
-    phone: "+1555666777",
-    pickupLocation: "Hotel Downtown",
-    arrivalDate: "2023-06-16",
-    arrivalTime: "09:15",
-    numberOfGuests: 2,
   },
   {
     name: "Charlie Brown",
     email: "charlie@example.com",
     phone: "+1888999000",
-    pickupLocation: "Train Station",
-    arrivalDate: "2023-06-16",
-    arrivalTime: "10:45",
+    pickupLocation: "Airport",
+    arrivalDate: "2024-03-20",
+    arrivalTime: "14:30",
     numberOfGuests: 4,
   },
+  // Test Case 2: Single pickup within driver capacity
+  {
+    name: "Alice Williams",
+    email: "alice@example.com",
+    phone: "+1555666777",
+    pickupLocation: "Hotel Downtown",
+    arrivalDate: "2024-03-20",
+    arrivalTime: "15:15",
+    numberOfGuests: 2,
+  },
+  // Test Case 3: Large group exceeding single driver capacity
+  {
+    name: "Family Group",
+    email: "family@example.com",
+    phone: "+1444555666",
+    pickupLocation: "Train Station",
+    arrivalDate: "2024-03-20",
+    arrivalTime: "16:00",
+    numberOfGuests: 8,
+  },
+  // Test Case 4: Multiple pickups close in time (within 30-min window)
+  {
+    name: "Quick Pickup 1",
+    email: "quick1@example.com",
+    phone: "+1777888999",
+    pickupLocation: "Airport",
+    arrivalDate: "2024-03-20",
+    arrivalTime: "17:00",
+    numberOfGuests: 2,
+  },
+  {
+    name: "Quick Pickup 2",
+    email: "quick2@example.com",
+    phone: "+1777888990",
+    pickupLocation: "Airport",
+    arrivalDate: "2024-03-20",
+    arrivalTime: "17:15",
+    numberOfGuests: 1,
+  },
+  {
+    name: "Quick Pickup 3",
+    email: "quick3@example.com",
+    phone: "+1777888991",
+    pickupLocation: "Airport",
+    arrivalDate: "2024-03-20",
+    arrivalTime: "17:25",
+    numberOfGuests: 1,
+  },
+  // Test Case 5: Late night pickup
+  {
+    name: "Late Arrival",
+    email: "late@example.com",
+    phone: "+1123456789",
+    pickupLocation: "Airport",
+    arrivalDate: "2024-03-20",
+    arrivalTime: "23:45",
+    numberOfGuests: 2,
+  },
+  // Test Case 6: Early morning next day
+  {
+    name: "Early Bird",
+    email: "early@example.com",
+    phone: "+1987654322",
+    pickupLocation: "Train Station",
+    arrivalDate: "2024-03-21",
+    arrivalTime: "05:30",
+    numberOfGuests: 1,
+  },
+  // Test Case 7: Multiple locations same time
+  {
+    name: "Hotel Guest",
+    email: "hotel@example.com",
+    phone: "+1222333444",
+    pickupLocation: "Hotel Downtown",
+    arrivalDate: "2024-03-20",
+    arrivalTime: "17:00",
+    numberOfGuests: 3,
+  },
+  // Test Case 8: Multiple pickups at Train Station within 30-min window
+  {
+    name: "Train Guest 1",
+    email: "train1@example.com",
+    phone: "+1333444555",
+    pickupLocation: "Train Station",
+    arrivalDate: "2024-03-20",
+    arrivalTime: "18:00",
+    numberOfGuests: 2,
+  },
+  {
+    name: "Train Guest 2",
+    email: "train2@example.com",
+    phone: "+1333444556",
+    pickupLocation: "Train Station",
+    arrivalDate: "2024-03-20",
+    arrivalTime: "18:20",
+    numberOfGuests: 1,
+  }
+]
+
+// Add dummy itinerary data
+const dummyItinerary = [
+  // Test Case 1: Multiple drivers for simultaneous Airport pickups
+  {
+    id: "itinerary-1",
+    driverId: "driver-1",
+    pickupLocation: "Airport",
+    pickupTime: "2024-03-20T14:30:00",
+    guests: [
+      {
+        name: "John Smith",
+        numberOfGuests: 2
+      }
+    ],
+    totalGuests: 2
+  },
+  {
+    id: "itinerary-2",
+    driverId: "driver-2",
+    pickupLocation: "Airport",
+    pickupTime: "2024-03-20T14:30:00",
+    guests: [
+      {
+        name: "Jane Doe",
+        numberOfGuests: 3
+      }
+    ],
+    totalGuests: 3
+  },
+  {
+    id: "itinerary-3",
+    driverId: "driver-3",
+    pickupLocation: "Airport",
+    pickupTime: "2024-03-20T14:30:00",
+    guests: [
+      {
+        name: "Charlie Brown",
+        numberOfGuests: 4
+      }
+    ],
+    totalGuests: 4
+  },
+  // Test Case 2: Single pickup within capacity
+  {
+    id: "itinerary-4",
+    driverId: "driver-1",
+    pickupLocation: "Hotel Downtown",
+    pickupTime: "2024-03-20T15:15:00",
+    guests: [
+      {
+        name: "Alice Williams",
+        numberOfGuests: 2
+      }
+    ],
+    totalGuests: 2
+  },
+  // Test Case 3: Split large group across drivers
+  {
+    id: "itinerary-5",
+    driverId: "driver-2",
+    pickupLocation: "Train Station",
+    pickupTime: "2024-03-20T16:00:00",
+    guests: [
+      {
+        name: "Family Group",
+        numberOfGuests: 4
+      }
+    ],
+    totalGuests: 4
+  },
+  {
+    id: "itinerary-6",
+    driverId: "driver-3",
+    pickupLocation: "Train Station",
+    pickupTime: "2024-03-20T16:00:00",
+    guests: [
+      {
+        name: "Family Group",
+        numberOfGuests: 4
+      }
+    ],
+    totalGuests: 4
+  },
+  // Test Case 4 & 7: Multiple locations and close timing
+  {
+    id: "itinerary-7",
+    driverId: "driver-1",
+    pickupLocation: "Airport",
+    pickupTime: "2024-03-20T17:00:00",
+    guests: [
+      {
+        name: "Quick Pickup 1",
+        numberOfGuests: 2
+      },
+      {
+        name: "Quick Pickup 2",
+        numberOfGuests: 1
+      },
+      {
+        name: "Quick Pickup 3",
+        numberOfGuests: 1
+      }
+    ],
+    totalGuests: 4,
+    waitTime: 25 // minutes waited for all passengers
+  },
+  {
+    id: "itinerary-8",
+    driverId: "driver-2",
+    pickupLocation: "Hotel Downtown",
+    pickupTime: "2024-03-20T17:00:00",
+    guests: [
+      {
+        name: "Hotel Guest",
+        numberOfGuests: 3
+      }
+    ],
+    totalGuests: 3
+  },
+  // Test Case 8: Combined Train Station pickups within 30-min window
+  {
+    id: "itinerary-9",
+    driverId: "driver-3",
+    pickupLocation: "Train Station",
+    pickupTime: "2024-03-20T18:00:00",
+    guests: [
+      {
+        name: "Train Guest 1",
+        numberOfGuests: 2
+      },
+      {
+        name: "Train Guest 2",
+        numberOfGuests: 1
+      }
+    ],
+    totalGuests: 3,
+    waitTime: 20 // minutes waited for all passengers
+  },
+  // Test Case 5: Late night pickup
+  {
+    id: "itinerary-10",
+    driverId: "driver-1",
+    pickupLocation: "Airport",
+    pickupTime: "2024-03-20T23:45:00",
+    guests: [
+      {
+        name: "Late Arrival",
+        numberOfGuests: 2
+      }
+    ],
+    totalGuests: 2
+  },
+  // Test Case 6: Early morning next day
+  {
+    id: "itinerary-11",
+    driverId: "driver-2",
+    pickupLocation: "Train Station",
+    pickupTime: "2024-03-21T05:30:00",
+    guests: [
+      {
+        name: "Early Bird",
+        numberOfGuests: 1
+      }
+    ],
+    totalGuests: 1
+  }
 ]
 
 export function TestCase() {
@@ -66,22 +314,28 @@ export function TestCase() {
     setDriverCapacity,
     drivers,
     setDrivers,
+    setItinerary,
+    currentStep,
+    setCurrentStep
   } = useWorkflow()
 
-  const [currentStep, setCurrentStep] = useState(1)
-  const [itinerary, setItinerary] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
   // Step 1: Load sample CSV data
-  const loadSampleData = () => {
-    setCsvData(sampleCsvData)
-    setSelectedCsvFile("sample_wedding_guests.csv")
-    setCurrentStep(2)
+  const loadSampleData = async () => {
+    setIsLoading(true)
+    try {
+      setCsvData(sampleCsvData)
+      setSelectedCsvFile("sample_wedding_guests.csv")
+      setCurrentStep("review")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   // Step 2: Extract locations and set round-trip times
   useEffect(() => {
-    if (currentStep === 2) {
+    if (currentStep === "review") {
       const locations = [...new Set(sampleCsvData.map((guest) => guest.pickupLocation))]
       setLocationTimings(
         locations.map((location) => ({
@@ -94,223 +348,153 @@ export function TestCase() {
   }, [currentStep, setLocationTimings, setDriverCapacity])
 
   // Step 3: Add sample drivers
-  const addSampleDrivers = () => {
-    setDrivers([
-      {
-        id: "driver-1",
-        name: "Driver One",
-        phone: "+1111111111",
-        vehicleCapacity: 4,
-      },
-      {
-        id: "driver-2",
-        name: "Driver Two",
-        phone: "+2222222222",
-        vehicleCapacity: 6,
-      },
-    ])
-    setCurrentStep(3)
+  const addSampleDrivers = async () => {
+    setIsLoading(true)
+    try {
+      setDrivers([
+        {
+          id: "driver-1",
+          name: "Driver One",
+          phone: "+1111111111",
+          vehicleCapacity: 4,
+          availability: "24/7"
+        },
+        {
+          id: "driver-2",
+          name: "Driver Two",
+          phone: "+2222222222",
+          vehicleCapacity: 6,
+          availability: "Day Shift (6 AM - 6 PM)"
+        },
+        {
+          id: "driver-3",
+          name: "Driver Three",
+          phone: "+3333333333",
+          vehicleCapacity: 4,
+          availability: "Night Shift (2 PM - 2 AM)"
+        },
+      ])
+      setCurrentStep("itinerary")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  // Step 4: Generate itinerary
-  const generateItinerary = () => {
+  // Step 4: Set dummy itinerary
+  const setDummyItinerary = async () => {
     setIsLoading(true)
-
-    // Simulate processing time
-    setTimeout(() => {
-      // Group guests by pickup location
-      const guestsByLocation: Record<string, typeof sampleCsvData> = {}
-
-      sampleCsvData.forEach((guest) => {
-        if (!guestsByLocation[guest.pickupLocation]) {
-          guestsByLocation[guest.pickupLocation] = []
-        }
-        guestsByLocation[guest.pickupLocation].push(guest)
-      })
-
-      // Sort locations by round trip time (descending)
-      const sortedLocations = locationTimings
-        .sort((a, b) => b.roundTripMinutes - a.roundTripMinutes)
-        .map((timing) => timing.location)
-
-      // Generate itinerary items
-      const newItinerary: any[] = []
-      let currentDriverIndex = 0
-
-      sortedLocations.forEach((location) => {
-        const guests = guestsByLocation[location] || []
-        const remainingGuests = [...guests]
-
-        while (remainingGuests.length > 0) {
-          // If we have drivers
-          if (drivers.length > 0) {
-            const driver = drivers[currentDriverIndex % drivers.length]
-            currentDriverIndex++
-
-            // Calculate how many guests this driver can take
-            let currentCapacity = driver.vehicleCapacity
-            const assignedGuests: typeof remainingGuests = []
-
-            // Assign guests to this driver until capacity is reached
-            while (currentCapacity > 0 && remainingGuests.length > 0) {
-              const guest = remainingGuests[0]
-              const guestCount = Number.parseInt(guest.numberOfGuests.toString()) || 1
-
-              if (guestCount <= currentCapacity) {
-                assignedGuests.push(guest)
-                currentCapacity -= guestCount
-                remainingGuests.shift()
-              } else {
-                // If this guest has too many people, skip for now
-                break
-              }
-            }
-
-            if (assignedGuests.length > 0) {
-              // Calculate total guests
-              const totalGuests = assignedGuests.reduce(
-                (sum, guest) => sum + (Number.parseInt(guest.numberOfGuests.toString()) || 1),
-                0,
-              )
-
-              // Create an itinerary item
-              newItinerary.push({
-                id: `itinerary-${Date.now()}-${Math.random()}`,
-                driverId: driver.id,
-                driverName: driver.name,
-                driverPhone: driver.phone,
-                pickupLocation: location,
-                pickupTime: assignedGuests[0].arrivalTime, // Simplified
-                guests: assignedGuests.map((g) => ({
-                  name: g.name,
-                  numberOfGuests: Number.parseInt(g.numberOfGuests.toString()) || 1,
-                })),
-                totalGuests,
-                roundTripMinutes: locationTimings.find((lt) => lt.location === location)?.roundTripMinutes || 60,
-              })
-            }
-          }
-        }
-      })
-
-      setItinerary(newItinerary)
+    try {
+      setItinerary(dummyItinerary)
+      setCurrentStep("communication")
+    } finally {
       setIsLoading(false)
-      setCurrentStep(4)
-    }, 1500)
+    }
+  }
+
+  // Map workflow steps to tab values
+  const stepToTab = {
+    upload: "step-1",
+    review: "step-2",
+    itinerary: "step-3",
+    communication: "step-4"
+  }
+
+  // Map tab values to workflow steps
+  const tabToStep = {
+    "step-1": "upload",
+    "step-2": "review",
+    "step-3": "itinerary",
+    "step-4": "communication"
+  } as const
+
+  const handleTabChange = (value: string) => {
+    setCurrentStep(tabToStep[value as keyof typeof tabToStep])
   }
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle>Wedding Travel System Test Case</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Tabs defaultValue={`step-${currentStep}`} className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="step-1">Step 1: CSV Upload</TabsTrigger>
-            <TabsTrigger value="step-2">Step 2: Data Review</TabsTrigger>
-            <TabsTrigger value="step-3">Step 3: Drivers</TabsTrigger>
-            <TabsTrigger value="step-4">Step 4: Itinerary</TabsTrigger>
-          </TabsList>
+    <div className="space-y-8">
+      <Card>
+        <CardHeader>
+          <CardTitle>Test Workflow</CardTitle>
+          <CardDescription>Step through the workflow with sample data</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs value={stepToTab[currentStep]} onValueChange={handleTabChange}>
+            <TabsList>
+              <TabsTrigger value="step-1">1. Load Data</TabsTrigger>
+              <TabsTrigger value="step-2">2. Review</TabsTrigger>
+              <TabsTrigger value="step-3">3. Drivers</TabsTrigger>
+              <TabsTrigger value="step-4">4. Itinerary</TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="step-1" className="space-y-4">
-            <div className="p-4 border rounded-md">
-              <h3 className="text-lg font-medium mb-4">Sample CSV Data</h3>
-              <ScrollArea className="h-[300px]">
-                <pre className="text-xs">{JSON.stringify(sampleCsvData, null, 2)}</pre>
-              </ScrollArea>
-              <Button onClick={loadSampleData} className="mt-4">
-                Load Sample Data
-              </Button>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="step-2" className="space-y-4">
-            <div className="p-4 border rounded-md">
-              <h3 className="text-lg font-medium mb-4">Extracted Locations & Round-Trip Times</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {locationTimings.map((timing, index) => (
-                  <div key={index} className="p-3 border rounded-md">
-                    <div className="font-medium">{timing.location}</div>
-                    <div className="text-sm text-muted-foreground">
-                      Round-trip time: {timing.roundTripMinutes} minutes
-                    </div>
-                  </div>
-                ))}
+            <TabsContent value="step-1">
+              <div className="p-4 border rounded-md">
+                <h3 className="text-lg font-medium mb-4">Sample CSV Data</h3>
+                <pre className="bg-gray-100 p-4 rounded-md overflow-auto max-h-60">
+                  {JSON.stringify(sampleCsvData, null, 2)}
+                </pre>
+                <Button onClick={loadSampleData} className="mt-4" disabled={isLoading}>
+                  {isLoading ? "Loading..." : "Load Sample Data"}
+                </Button>
               </div>
-              <div className="mt-4 p-3 border rounded-md">
-                <div className="font-medium">Driver Capacity</div>
-                <div className="text-sm text-muted-foreground">
-                  Maximum passengers per vehicle: {driverCapacity.maxPassengers}
-                </div>
-              </div>
-              <Button onClick={addSampleDrivers} className="mt-4" disabled={locationTimings.length === 0}>
-                Continue to Drivers
-              </Button>
-            </div>
-          </TabsContent>
+            </TabsContent>
 
-          <TabsContent value="step-3" className="space-y-4">
-            <div className="p-4 border rounded-md">
-              <h3 className="text-lg font-medium mb-4">Sample Drivers</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {drivers.map((driver, index) => (
-                  <div key={index} className="p-3 border rounded-md">
-                    <div className="font-medium">{driver.name}</div>
-                    <div className="text-sm text-muted-foreground">Phone: {driver.phone}</div>
-                    <div className="text-sm text-muted-foreground">
-                      Vehicle capacity: {driver.vehicleCapacity} passengers
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <Button onClick={generateItinerary} className="mt-4" disabled={drivers.length === 0 || isLoading}>
-                {isLoading ? "Generating..." : "Generate Itinerary"}
-              </Button>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="step-4" className="space-y-4">
-            <div className="p-4 border rounded-md">
-              <h3 className="text-lg font-medium mb-4">Generated Itinerary</h3>
-              {itinerary.length === 0 ? (
-                <div className="text-center p-8 text-muted-foreground">No itinerary generated yet</div>
-              ) : (
-                <ScrollArea className="h-[400px]">
-                  <div className="space-y-4">
-                    {itinerary.map((item, index) => (
-                      <div key={index} className="p-4 border rounded-md">
-                        <div className="flex justify-between items-center mb-2">
-                          <div>
-                            <div className="font-medium">Pickup: {item.pickupLocation}</div>
-                            <div className="text-sm text-muted-foreground">
-                              Time: {item.pickupTime} | Round-trip: {item.roundTripMinutes} minutes
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="font-medium">{item.driverName}</div>
-                            <div className="text-sm text-muted-foreground">{item.driverPhone}</div>
-                          </div>
-                        </div>
-                        <div className="mt-2">
-                          <div className="font-medium">Guests ({item.totalGuests} total):</div>
-                          <ul className="list-disc list-inside">
-                            {item.guests.map((guest: any, guestIndex: number) => (
-                              <li key={guestIndex} className="text-sm">
-                                {guest.name} ({guest.numberOfGuests} {guest.numberOfGuests > 1 ? "people" : "person"})
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
+            <TabsContent value="step-2">
+              <div className="p-4 border rounded-md">
+                <h3 className="text-lg font-medium mb-4">Extracted Locations & Round-Trip Times</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  {locationTimings.map((timing, index) => (
+                    <div key={index} className="p-3 border rounded-md">
+                      <div className="font-medium">{timing.location}</div>
+                      <div className="text-sm text-muted-foreground">
+                        Round-trip time: {timing.roundTripMinutes} minutes
                       </div>
-                    ))}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 p-3 border rounded-md">
+                  <div className="font-medium">Driver Capacity</div>
+                  <div className="text-sm text-muted-foreground">
+                    Maximum passengers per vehicle: {driverCapacity.maxPassengers}
                   </div>
-                </ScrollArea>
-              )}
-            </div>
-          </TabsContent>
-        </Tabs>
-      </CardContent>
-    </Card>
+                </div>
+                <Button onClick={addSampleDrivers} className="mt-4" disabled={locationTimings.length === 0 || isLoading}>
+                  {isLoading ? "Adding Drivers..." : "Continue to Drivers"}
+                </Button>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="step-3">
+              <div className="p-4 border rounded-md">
+                <h3 className="text-lg font-medium mb-4">Sample Drivers</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  {drivers.map((driver, index) => (
+                    <div key={index} className="p-3 border rounded-md">
+                      <div className="font-medium">{driver.name}</div>
+                      <div className="text-sm text-muted-foreground">Phone: {driver.phone}</div>
+                      <div className="text-sm text-muted-foreground">
+                        Vehicle capacity: {driver.vehicleCapacity} passengers
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <Button onClick={setDummyItinerary} className="mt-4" disabled={drivers.length === 0 || isLoading}>
+                  {isLoading ? "Setting Itinerary..." : "Set Dummy Itinerary"}
+                </Button>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="step-4">
+              <div className="p-4 border rounded-md">
+                <h3 className="text-lg font-medium mb-4">Generated Itinerary</h3>
+                <pre className="bg-gray-100 p-4 rounded-md overflow-auto max-h-60">
+                  {JSON.stringify(dummyItinerary, null, 2)}
+                </pre>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+    </div>
   )
 }
