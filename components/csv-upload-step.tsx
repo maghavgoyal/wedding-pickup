@@ -9,48 +9,38 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { FileUp, Upload, AlertCircle, CheckCircle2, FileText, Clock, Calendar, ArrowLeft, History, Loader2 } from "lucide-react"
+import { FileUp, Upload, AlertCircle, CheckCircle2, FileText, Clock, Calendar, ArrowLeft } from "lucide-react"
 import { useWorkflow } from "@/context/workflow-context"
 import { parseCSVData, processGuestTickets } from "@/lib/guest-parser"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
-// Mock previously uploaded CSV files
-const previousUploads = [
-  { id: "1", name: "Smith-Johnson Wedding Guests.csv", date: "2023-05-15", guests: 42 },
-  { id: "2", name: "Williams-Brown Wedding Guests.csv", date: "2023-06-02", guests: 28 },
-  { id: "3", name: "Davis-Miller Wedding Guests.csv", date: "2023-06-10", guests: 35 },
-]
-
 export function CsvUploadStep() {
-  const {
-    setCurrentStep,
-    setSelectedCsvFile,
-    setGuestData,
+  const { 
+    setCurrentStep, 
+    setSelectedCsvFile, 
+    setGuestData, 
     setCsvData,
     savedCsvFiles,
-    loadSavedState,
-    resetWorkflow
+    handleFileUpload
   } = useWorkflow()
-
+  
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  const [loadingPrevious, setLoadingPrevious] = useState<string | null>(null)
+  const [selectedPrevious, setSelectedPrevious] = useState<string | null>(null)
   const [processingStatus, setProcessingStatus] = useState<Array<{ guest: string; status: string; error?: string; details?: string }>>([])
-  
-  // State to manage which view is shown: initial choice, new upload, or previous upload
   const [uploadMode, setUploadMode] = useState<'initial' | 'new' | 'previous'>('initial')
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
     if (selectedFile) {
       if (selectedFile.type === "text/csv" || selectedFile.name.endsWith('.csv')) {
-        resetWorkflow()
         setFile(selectedFile)
         setError(null)
+        setSelectedPrevious(null) // Clear previous selection if new file is chosen
         setSuccess(false)
         setProcessingStatus([])
       } else {
@@ -75,24 +65,25 @@ export function CsvUploadStep() {
       reader.onload = async (event) => {
         try {
           const csvContent = event.target?.result as string
-          if (!csvContent || !csvContent.trim()) {
-            throw new Error("CSV file is empty or could not be read.")
+          if (!csvContent) {
+            throw new Error("Failed to read CSV file - file appears to be empty")
+          }
+
+          if (!csvContent.trim()) {
+            throw new Error("The CSV file is empty. Please check the file and try again.")
           }
 
           const lines = csvContent.split('\n')
           if (lines.length < 2) {
-            throw new Error("CSV must contain a header row and at least one guest row.")
+            throw new Error("The CSV file must contain at least a header row and one guest row.")
           }
 
           // Parse the CSV data
           const guests = parseCSVData(csvContent)
+          
           if (guests.length === 0) {
-            throw new Error("No valid guest data found in the CSV file.")
+            throw new Error("No guest data was found in the CSV file. Please check the file format.")
           }
-
-          // IMPORTANT: Set raw CSV data first for persistence saving
-          setCsvData(guests) 
-          setSelectedCsvFile(file.name) // Set the filename early
 
           setProcessingStatus(guests.map(g => ({ 
             guest: g.name || 'Unknown Guest', 
@@ -111,9 +102,8 @@ export function CsvUploadStep() {
             })
           }, 200)
 
-          // Process each guest's tickets (Assuming this step is for display/review only)
-          // The raw `guests` data is already set in context for itinerary generation
-          const processedGuestDisplayData = await Promise.all(
+          // Process each guest's tickets
+          const processedGuests = await Promise.all(
             guests.map(async (guest, index) => {
               try {
                 setProcessingStatus(prev => 
@@ -126,7 +116,7 @@ export function CsvUploadStep() {
                 
                 // Update progress based on guest processing
                 setProgress(Math.min(95, Math.floor((index / guests.length) * 90)))
-                const processedGuest = await processGuestTickets(guest) // This might be redundant if driveLink processing isn't needed for itinerary
+                const processedGuest = await processGuestTickets(guest)
                 
                 setProcessingStatus(prev => 
                   prev.map(p => p.guest === guest.name ? { 
@@ -139,7 +129,7 @@ export function CsvUploadStep() {
                   } : p)
                 )
                 
-                return processedGuest // Return the processed data for display
+                return processedGuest
               } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred'
                 setProcessingStatus(prev => 
@@ -150,22 +140,41 @@ export function CsvUploadStep() {
                     details: `Failed to process ticket. ${errorMessage}`
                   } : p)
                 )
-                return guest // Return original guest on error
+                return guest
               }
             })
           )
 
-          // Use the potentially enhanced data for the guestData state (for review step display)
-          setGuestData(processedGuestDisplayData);
-
-          const failedGuests = processedGuestDisplayData.filter(g => !g.pickupLocation)
+          const failedGuests = processedGuests.filter(g => !g.pickupLocation)
           if (failedGuests.length > 0) {
-            setError(`Warning: ${failedGuests.length} guest(s) are missing ticket information. Review recommended.`)
+            setError(`Warning: ${failedGuests.length} guest(s) are missing ticket information. You can still proceed, but please review the details.`)
           }
 
           clearInterval(progressInterval)
           setProgress(100)
           setSuccess(true)
+
+          // Save the initial state to localStorage
+          const initialState = {
+            csvData: processedGuests,
+            guestData: processedGuests,
+            locationTimings: [],
+            drivers: [],
+            itinerary: [],
+            currentStep: "review"
+          }
+          localStorage.setItem(`weddingPickup_${file.name}`, JSON.stringify(initialState))
+          
+          // Update the list of saved files
+          const savedCsvs = JSON.parse(localStorage.getItem('weddingPickup_savedCsvs') || '[]')
+          if (!savedCsvs.includes(file.name)) {
+            savedCsvs.push(file.name)
+            localStorage.setItem('weddingPickup_savedCsvs', JSON.stringify(savedCsvs))
+          }
+
+          setSelectedCsvFile(file.name)
+          setGuestData(processedGuests)
+          setCsvData(processedGuests)
 
           // Move to the next step after a short delay
           setTimeout(() => {
@@ -180,7 +189,7 @@ export function CsvUploadStep() {
       }
 
       reader.onerror = (error) => {
-        setError("Failed to read the CSV file.")
+        setError("Failed to read the CSV file. The file may be corrupted or inaccessible.")
         setUploading(false)
         setProgress(0)
       }
@@ -194,19 +203,29 @@ export function CsvUploadStep() {
     }
   }
 
-  const handleSelectPrevious = async (filename: string) => {
-    setLoadingPrevious(filename) // Show loading indicator for this file
-    setError(null)
-    setSuccess(false)
-    setFile(null)
-    try {
-      await loadSavedState(filename); // Call the function from context
-      // loadSavedState will handle setting the current step and data
-    } catch (err) {
-      setError(`Failed to load saved state for ${filename}. Please try again or upload fresh.`);
-      console.error("Error in handleSelectPrevious:", err);
-    } finally {
-      setLoadingPrevious(null) // Hide loading indicator
+  const handleSelectPrevious = (filename: string) => {
+    setSelectedPrevious(filename)
+    setFile(null) // Clear new file if previous is selected
+    
+    // Load the saved state
+    const savedState = localStorage.getItem(`weddingPickup_${filename}`)
+    if (savedState) {
+      try {
+        const parsedState = JSON.parse(savedState)
+        if (Array.isArray(parsedState.csvData)) {
+          setCsvData(parsedState.csvData)
+        }
+        if (Array.isArray(parsedState.guestData)) {
+          setGuestData(parsedState.guestData)
+        }
+        setSelectedCsvFile(filename)
+        setCurrentStep("review")
+      } catch (error) {
+        console.error("Error loading saved state:", error)
+        setError("Failed to load the saved guest list. Please try uploading again.")
+      }
+    } else {
+      setError("Could not find the saved guest list. Please try uploading again.")
     }
   }
 
@@ -221,12 +240,10 @@ export function CsvUploadStep() {
           <Upload className="mr-2 h-5 w-5" />
           Upload New CSV
         </Button>
-        {savedCsvFiles.length > 0 && (
-          <Button size="lg" variant="outline" onClick={() => setUploadMode('previous')} className="w-full sm:w-auto">
-            <History className="mr-2 h-5 w-5" />
-            Use Previous Upload
-          </Button>
-        )}
+        <Button size="lg" variant="outline" onClick={() => setUploadMode('previous')} className="w-full sm:w-auto">
+          <FileText className="mr-2 h-5 w-5" />
+          Use Previous Upload
+        </Button>
       </CardContent>
     </Card>
   );
@@ -236,12 +253,13 @@ export function CsvUploadStep() {
       <CardHeader>
         <div className="flex items-center justify-between mb-2">
           <CardTitle>Upload New Guest List</CardTitle>
-          <Button variant="ghost" size="sm" onClick={() => { resetWorkflow(); setUploadMode('initial'); }} className="text-xs text-muted-foreground">
+          <Button variant="ghost" size="sm" onClick={() => setUploadMode('initial')} className="text-xs text-muted-foreground">
             <ArrowLeft className="mr-1 h-3 w-3" /> Back
           </Button>
         </div>
         <CardDescription>
-          Upload a CSV file containing guest information (Name, Phone, Pickup Location, # Guests, Arrival Date, Arrival Time).
+          Upload a CSV file containing guest travel information and Google Drive links.
+          The CSV must include columns for Name, Phone Number, and Drive link.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -256,81 +274,96 @@ export function CsvUploadStep() {
                 type="file"
                 accept=".csv"
                 onChange={handleFileChange}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                disabled={uploading}
+                className="cursor-pointer"
               />
-              <Button variant="outline" asChild className="w-full justify-start text-muted-foreground">
-                <div>
-                  <FileUp className="mr-2 h-4 w-4" />
-                  {file ? (
-                    <span className="font-medium text-primary truncate" title={file.name}>{file.name}</span>
-                  ) : (
-                    "Choose CSV File..."
-                  )}
-                </div>
-              </Button>
             </div>
-            <Button onClick={handleUpload} disabled={!file || uploading} className="min-w-[120px]">
-              {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-              {uploading ? "Processing..." : "Process File"}
+            <Button
+              onClick={handleUpload}
+              disabled={!file || uploading}
+              className="min-w-[100px]"
+            >
+              {uploading && progress < 100 ? (
+                <>
+                  <Clock className="mr-2 h-4 w-4 animate-spin" />
+                  Processing
+                </>
+              ) : success ? (
+                <>
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  Uploaded
+                </>
+              ) : (
+                <>
+                  <Upload className="mr-2 h-4 w-4" />
+                  Upload
+                </>
+              )}
             </Button>
           </div>
         </div>
 
-        {uploading && <Progress value={progress} className="w-full h-2" />}
-        
         {error && (
-          <Alert variant="destructive">
+          <Alert variant={error.startsWith('Warning:') ? 'default' : 'destructive'}>
             <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Error</AlertTitle>
+            <AlertTitle>{error.startsWith('Warning:') ? 'Warning' : 'Error'}</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-        
-        {success && (
+
+        {uploading && (
+          <div className="space-y-2">
+            <Progress value={progress} className="w-full" />
+            {processingStatus.length > 0 && (
+              <div className="mt-4 p-4 border rounded-md bg-gray-50/50">
+                <h4 className="text-sm font-medium mb-2 text-gray-600">Processing Guests...</h4>
+                <ScrollArea className="h-[200px]">
+                  <div className="space-y-2 pr-3">
+                    {processingStatus.map((item, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between text-xs p-2 rounded-md"
+                        style={{
+                          backgroundColor: item.status === 'error' ? '#fee2e2' : item.status === 'warning' ? '#fef3c7' : item.status === 'complete' ? '#dcfce7' : '#f3f4f6'
+                        }}
+                      >
+                        <span className="font-medium truncate mr-2">{item.guest}</span>
+                        <TooltipProvider delayDuration={100}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="flex items-center gap-1 whitespace-nowrap">
+                                {item.status === 'pending' && <Clock className="h-3 w-3 text-gray-400" />}
+                                {item.status === 'processing' && <Clock className="h-3 w-3 text-blue-500 animate-spin" />}
+                                {item.status === 'complete' && <CheckCircle2 className="h-3 w-3 text-green-600" />}
+                                {item.status === 'warning' && <AlertCircle className="h-3 w-3 text-yellow-600" />}
+                                {item.status === 'error' && <AlertCircle className="h-3 w-3 text-red-600" />}
+                                <span className="capitalize">{item.status}</span>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="max-w-xs text-xs">
+                                {item.error || item.details || item.status}
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
+          </div>
+        )}
+
+        {success && !error?.startsWith('Warning:') && (
           <Alert variant="default">
             <CheckCircle2 className="h-4 w-4 text-green-500" />
-            <AlertTitle>Success</AlertTitle>
-            <AlertDescription>
-              CSV processed successfully! Moving to the next step...
+            <AlertTitle className="text-green-700">Upload Successful!</AlertTitle>
+            <AlertDescription className="text-green-600">
+              Guest data processed. You will be moved to the next step shortly.
             </AlertDescription>
           </Alert>
-        )}
-        
-        {processingStatus.length > 0 && (
-          <div className="pt-4">
-            <h4 className="text-sm font-medium mb-2">Processing Details:</h4>
-            <ScrollArea className="h-[200px] border rounded-md p-2 bg-gray-50/50">
-              <div className="space-y-1">
-                {processingStatus.map((item, index) => (
-                  <TooltipProvider key={index} delayDuration={100}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="flex items-center justify-between text-xs p-1 rounded hover:bg-gray-100">
-                          <span className="truncate pr-2">{item.guest}</span>
-                          <span className={`flex items-center gap-1 font-medium 
-                            ${item.status === 'complete' ? 'text-green-600' : 
-                              item.status === 'pending' ? 'text-gray-500' : 
-                              item.status === 'processing' ? 'text-blue-600 animate-pulse' : 
-                              item.status === 'warning' ? 'text-yellow-600' : 'text-red-600'}`}>
-                            {item.status === 'pending' && <Clock className="h-3 w-3" />}
-                            {item.status === 'processing' && <Loader2 className="h-3 w-3 animate-spin" />}
-                            {item.status === 'complete' && <CheckCircle2 className="h-3 w-3" />}
-                            {item.status === 'warning' && <AlertCircle className="h-3 w-3" />}
-                            {item.status === 'error' && <AlertCircle className="h-3 w-3" />}
-                            {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
-                          </span>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="left" className="max-w-xs break-words text-xs">
-                        <p>{item.details || 'No details available.'}</p>
-                        {item.error && <p className="text-red-600 mt-1">Error: {item.error}</p>}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                ))}
-              </div>
-            </ScrollArea>
-          </div>
         )}
       </CardContent>
     </Card>
@@ -340,37 +373,62 @@ export function CsvUploadStep() {
     <Card className="wedding-card">
       <CardHeader>
         <div className="flex items-center justify-between mb-2">
-          <CardTitle>Use Previous Upload</CardTitle>
+          <CardTitle>Use Previous Guest List</CardTitle>
           <Button variant="ghost" size="sm" onClick={() => setUploadMode('initial')} className="text-xs text-muted-foreground">
             <ArrowLeft className="mr-1 h-3 w-3" /> Back
           </Button>
         </div>
-        <CardDescription>Select a previously processed CSV file to load its data and itinerary.</CardDescription>
+        <CardDescription>
+          Select one of your previously uploaded guest lists to continue.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {savedCsvFiles.length === 0 ? (
-          <p className="text-muted-foreground text-center py-4">No previously saved CSV files found.</p>
+          <div className="text-center py-8 text-muted-foreground">
+            <FileText className="mx-auto h-12 w-12 mb-4 opacity-50" />
+            <p>No previous guest lists found.</p>
+            <Button variant="outline" onClick={() => setUploadMode('new')} className="mt-4">
+              Upload New Guest List
+            </Button>
+          </div>
         ) : (
-          <ScrollArea className="h-[300px]">
+          <ScrollArea className="h-[300px] pr-4">
             <div className="space-y-2">
-              {savedCsvFiles.map((filename) => (
-                <Button
-                  key={filename}
-                  variant="outline"
-                  className="w-full justify-start h-auto py-2 px-3 text-left flex items-center gap-3"
-                  onClick={() => handleSelectPrevious(filename)}
-                  disabled={loadingPrevious === filename}
-                >
-                  {loadingPrevious === filename ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  ) : (
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                  )}
-                  <span className={`flex-1 truncate font-medium ${loadingPrevious === filename ? 'text-muted-foreground' : 'text-primary'}`}>
-                    {filename}
-                  </span>
-                </Button>
-              ))}
+              {savedCsvFiles.map((filename) => {
+                // Get the saved state to show guest count
+                const savedState = localStorage.getItem(`weddingPickup_${filename}`);
+                let guestCount = 0;
+                if (savedState) {
+                  try {
+                    const parsedState = JSON.parse(savedState);
+                    guestCount = parsedState.csvData?.length || 0;
+                  } catch (e) {
+                    console.error('Error parsing saved state:', e);
+                  }
+                }
+
+                return (
+                  <div
+                    key={filename}
+                    className={`p-4 rounded-lg border cursor-pointer transition-colors ${
+                      selectedPrevious === filename
+                        ? 'bg-primary/5 border-primary'
+                        : 'hover:bg-accent'
+                    }`}
+                    onClick={() => handleSelectPrevious(filename)}
+                  >
+                    <div className="flex items-start gap-3">
+                      <FileText className="h-5 w-5 mt-1 text-primary" />
+                      <div className="flex-1">
+                        <p className="font-medium">{filename}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {guestCount} guests
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </ScrollArea>
         )}

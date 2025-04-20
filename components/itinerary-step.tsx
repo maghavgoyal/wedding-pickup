@@ -69,9 +69,6 @@ export const ItineraryStep = () => {
           }
         : driver
     ))
-    if (updates.name !== undefined || updates.phone !== undefined) {
-        setEditingDriver(null)
-    }
   }
 
   const addDriver = () => {
@@ -297,14 +294,60 @@ export const ItineraryStep = () => {
                         <TableBody>
                           {drivers.map((driver) => (
                             <TableRow key={driver.id}>
-                              <TableCell className="font-medium">{driver.name}</TableCell>
-                              <TableCell>{driver.phone}</TableCell>
-                              <TableCell>{driver.vehicleCapacity}</TableCell>
+                              <TableCell className="font-medium">
+                                {editingDriver === driver.id ? (
+                                  <Input
+                                    value={driver.name}
+                                    onChange={(e) => updateDriver(driver.id, { name: e.target.value })}
+                                    className="h-8"
+                                  />
+                                ) : (
+                                  driver.name
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {editingDriver === driver.id ? (
+                                  <Input
+                                    value={driver.phone}
+                                    onChange={(e) => updateDriver(driver.id, { phone: e.target.value })}
+                                    className="h-8"
+                                  />
+                                ) : (
+                                  driver.phone
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {editingDriver === driver.id ? (
+                                  <Input
+                                    type="number"
+                                    min="1"
+                                    value={driver.vehicleCapacity}
+                                    onChange={(e) => updateDriver(driver.id, { vehicleCapacity: e.target.value })}
+                                    className="h-8 w-20"
+                                  />
+                                ) : (
+                                  driver.vehicleCapacity
+                                )}
+                              </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex gap-1 justify-end">
-                                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => console.log('Edit driver:', driver.id)} > 
+                                  <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    className="h-8 w-8" 
+                                    onClick={() => {
+                                      if (editingDriver === driver.id) {
+                                        setEditingDriver(null);
+                                      } else {
+                                        setEditingDriver(driver.id);
+                                      }
+                                    }}
+                                  > 
                                     <span className="sr-only">Edit</span> 
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                                      <path d="m15 5 4 4"/>
+                                    </svg>
                                   </Button>
                                   <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => removeDriver(driver.id)}> 
                                     <span className="sr-only">Delete</span><Trash2 className="h-4 w-4" /> 

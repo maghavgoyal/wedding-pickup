@@ -1,7 +1,8 @@
 "use client"
 
 import type React from "react"
-import { createContext, useContext, useState, useEffect, useCallback } from "react"
+
+import { createContext, useContext, useState, useEffect } from "react"
 
 // Define interfaces for our data types
 interface LocationInfo {
@@ -18,6 +19,14 @@ interface DriverInfo {
   availability: string[]
 }
 
+interface Guest {
+  name: string
+  pickupLocation: string
+  numberOfGuests: number
+  arrivalDate: string
+  arrivalTime: string
+}
+
 // Add these new types and state variables to the context
 
 // Add these interfaces after the GuestData interface
@@ -27,7 +36,7 @@ export interface LocationTiming {
 }
 
 export interface DriverCapacity {
-  maxPassengers: number // Consider if this is still needed or part of Driver
+  maxPassengers: number
 }
 
 export interface Driver {
@@ -47,180 +56,205 @@ export interface ItineraryItem {
   guests: {
     name: string
     numberOfGuests: number
-    // Added these from generation logic for completeness
-    arrivalDate?: string 
-    arrivalTime?: string
   }[]
   totalGuests: number
 }
 
-// Saved state structure in localStorage
-interface SavedState {
-  csvData: any[];
-  locationTimings: LocationTiming[];
-  drivers: Driver[];
-  itinerary: ItineraryItem[];
-}
-
 export type WorkflowStep = "upload" | "review" | "itinerary" | "view_itinerary"
 
-// Update the WorkflowContextType interface
+// Update the WorkflowContextType interface to include the new state variables
 interface WorkflowContextType {
   // Existing properties
   currentStep: WorkflowStep
   setCurrentStep: (step: WorkflowStep) => void
-  csvData: any[] // Raw data from CSV for persistence & itinerary generation
+  csvData: any[]
   setCsvData: (data: any[]) => void
-  guestData: any[] | null // Processed data (e.g., with ticket info) for review display
-  setGuestData: (data: any[] | null) => void
   selectedFile: File | null
   setSelectedFile: (file: File | null) => void
   selectedCsvFile: string | null
   setSelectedCsvFile: (filename: string | null) => void
+  guestData: any[] | null
+  setGuestData: (data: any[] | null) => void
+  driverAssignments: Record<string, string[]>
+  setDriverAssignments: (assignments: Record<string, string[]>) => void
   locationTimings: LocationTiming[]
   setLocationTimings: (timings: LocationTiming[]) => void
+  driverCapacity: DriverCapacity
+  setDriverCapacity: (capacity: DriverCapacity) => void
   drivers: Driver[]
   setDrivers: (drivers: Driver[]) => void
+  // Add itinerary state
   itinerary: ItineraryItem[]
   setItinerary: (items: ItineraryItem[]) => void
-
-  // Persistence-related properties
-  savedCsvFiles: string[];
-  loadSavedState: (filename: string) => Promise<void>; // Make async to handle potential parsing/validation
-  resetWorkflow: () => void;
+  savedCsvFiles: string[]
+  handleFileUpload: (file: File) => void
+  resetWorkflow: () => void
 }
 
 const WorkflowContext = createContext<WorkflowContextType | undefined>(undefined)
 
-const SAVED_CSV_LIST_KEY = 'weddingPickup_savedCsvs';
-const getLocalStorageKey = (filename: string) => `weddingPickup_${filename}`;
-
+// Update the WorkflowProvider component to include the new state variables
 export const WorkflowProvider = ({ children }: { children: React.ReactNode }) => {
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("upload")
-  const [csvData, setCsvDataState] = useState<any[]>([])
-  const [guestData, setGuestData] = useState<any[] | null>(null) // Add back guestData state
+  const [csvData, setCsvData] = useState<any[]>([])
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [selectedCsvFile, setSelectedCsvFile] = useState<string | null>(null)
+  const [guestData, setGuestData] = useState<any[] | null>(null)
+  const [driverAssignments, setDriverAssignments] = useState<Record<string, string[]>>({})
   const [locationTimings, setLocationTimings] = useState<LocationTiming[]>([])
+  const [driverCapacity, setDriverCapacity] = useState<DriverCapacity>({ maxPassengers: 4 })
   const [drivers, setDrivers] = useState<Driver[]>([])
   const [itinerary, setItinerary] = useState<ItineraryItem[]>([])
-  const [savedCsvFiles, setSavedCsvFiles] = useState<string[]>([]);
+  const [savedCsvFiles, setSavedCsvFiles] = useState<string[]>([])
 
-  // Load the list of saved CSV files on mount
+  // Save state whenever it changes
+  useEffect(() => {
+    if (selectedCsvFile) {
+      try {
+        const stateToSave = {
+          csvData,
+          guestData,
+          driverAssignments,
+          locationTimings,
+          driverCapacity,
+          drivers,
+          itinerary,
+          currentStep
+        }
+        localStorage.setItem(`weddingPickup_${selectedCsvFile}`, JSON.stringify(stateToSave))
+        
+        // Update the list of saved CSVs
+        const savedCsvs = JSON.parse(localStorage.getItem('weddingPickup_savedCsvs') || '[]')
+        if (!savedCsvs.includes(selectedCsvFile)) {
+          savedCsvs.push(selectedCsvFile)
+          localStorage.setItem('weddingPickup_savedCsvs', JSON.stringify(savedCsvs))
+          setSavedCsvFiles(savedCsvs)
+        }
+      } catch (error) {
+        console.error("Error saving state:", error)
+      }
+    }
+  }, [selectedCsvFile, csvData, guestData, driverAssignments, locationTimings, driverCapacity, drivers, itinerary, currentStep])
+
+  // Load saved CSV files on mount
   useEffect(() => {
     try {
-      const savedList = localStorage.getItem(SAVED_CSV_LIST_KEY);
-      if (savedList) {
-        setSavedCsvFiles(JSON.parse(savedList));
-      }
+      const savedCsvs = JSON.parse(localStorage.getItem('weddingPickup_savedCsvs') || '[]')
+      setSavedCsvFiles(savedCsvs)
     } catch (error) {
-      console.error("Failed to load saved CSV list from localStorage:", error);
-      // Optionally clear corrupted data
-      // localStorage.removeItem(SAVED_CSV_LIST_KEY);
+      console.error("Error loading saved CSV files:", error)
+      setSavedCsvFiles([])
     }
-  }, []);
+  }, [])
 
-  // Function to reset workflow state
-  const resetWorkflow = useCallback(() => {
-    setCsvDataState([]);
-    setGuestData(null); // Reset guestData as well
-    setLocationTimings([]);
-    setDrivers([]);
-    setItinerary([]);
-    setSelectedFile(null);
-    setSelectedCsvFile(null);
-    setCurrentStep("upload"); // Reset to the beginning
-    console.log("Workflow state reset");
-  }, []);
-
-  // Modified setCsvData to reset related state first
-  const setCsvData = (data: any[]) => {
-    // Reset config/itinerary when new CSV data is loaded
-    setGuestData(null); // Also reset processed guest data
-    setLocationTimings([]);
-    setDrivers([]);
-    setItinerary([]);
-    setCsvDataState(data);
-  };
-
-  // Function to load saved state for a specific CSV file
-  const loadSavedState = useCallback(async (filename: string) => {
-    console.log(`Attempting to load state for ${filename}`);
-    try {
-      const savedDataString = localStorage.getItem(getLocalStorageKey(filename));
-      if (savedDataString) {
-        const savedState: SavedState = JSON.parse(savedDataString);
-        
-        // Basic validation (can be expanded)
-        if (savedState && Array.isArray(savedState.csvData)) {
-          setCsvDataState(savedState.csvData);
-          setLocationTimings(savedState.locationTimings || []);
-          setDrivers(savedState.drivers || []);
-          setItinerary(savedState.itinerary || []);
-          setSelectedCsvFile(filename);
-          setSelectedFile(null); // Clear selected file as we loaded from storage
-
-          // Determine the next step
-          if (savedState.itinerary && savedState.itinerary.length > 0) {
-            setCurrentStep("view_itinerary");
-            console.log(`Loaded state for ${filename}, jumping to view itinerary.`);
-          } else {
-            setCurrentStep("itinerary"); // Go to config step if no itinerary yet
-            console.log(`Loaded state for ${filename}, jumping to itinerary configuration.`);
+  // Load saved state when a CSV file is selected
+  useEffect(() => {
+    if (selectedCsvFile) {
+      try {
+        const savedState = localStorage.getItem(`weddingPickup_${selectedCsvFile}`)
+        if (savedState) {
+          const parsedState = JSON.parse(savedState)
+          
+          // Validate and set each piece of state
+          if (Array.isArray(parsedState.csvData)) {
+            setCsvData(parsedState.csvData)
           }
-          return;
-        } else {
-          console.error(`Invalid saved state structure for ${filename}. Resetting.`);
-          localStorage.removeItem(getLocalStorageKey(filename)); // Clean up corrupted data
-          // Remove from saved list as well
-          setSavedCsvFiles(prev => prev.filter(f => f !== filename));
-          localStorage.setItem(SAVED_CSV_LIST_KEY, JSON.stringify(savedCsvFiles.filter(f => f !== filename)));
-          resetWorkflow();
+          if (Array.isArray(parsedState.guestData)) {
+            setGuestData(parsedState.guestData)
+          }
+          if (typeof parsedState.driverAssignments === 'object') {
+            setDriverAssignments(parsedState.driverAssignments)
+          }
+          if (Array.isArray(parsedState.locationTimings)) {
+            setLocationTimings(parsedState.locationTimings)
+          }
+          if (typeof parsedState.driverCapacity === 'object') {
+            setDriverCapacity(parsedState.driverCapacity)
+          }
+          if (Array.isArray(parsedState.drivers)) {
+            setDrivers(parsedState.drivers)
+          }
+          if (Array.isArray(parsedState.itinerary)) {
+            setItinerary(parsedState.itinerary)
+          }
+          if (parsedState.currentStep) {
+            setCurrentStep(parsedState.currentStep)
+          }
         }
-      } else {
-        console.warn(`No saved state found for ${filename}. Starting fresh.`);
-        // If no state found, reset everything except the selected filename
-        resetWorkflow();
-        setSelectedCsvFile(filename);
-        // You might want to trigger CSV parsing here if the file object is available
-        // or expect the upload step to handle it.
+      } catch (error) {
+        console.error("Error loading saved state:", error)
+        // Reset to initial state if loading fails
+        resetWorkflow()
       }
-    } catch (error) {
-      console.error(`Failed to load or parse state for ${filename}:`, error);
-      // Optionally clear corrupted data and reset
-      localStorage.removeItem(getLocalStorageKey(filename));
-      setSavedCsvFiles(prev => prev.filter(f => f !== filename));
-      localStorage.setItem(SAVED_CSV_LIST_KEY, JSON.stringify(savedCsvFiles.filter(f => f !== filename)));
-      resetWorkflow();
     }
-  }, [resetWorkflow, savedCsvFiles]); // Added savedCsvFiles dependency
+  }, [selectedCsvFile])
+
+  const handleFileUpload = (file: File) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = e.target?.result as string
+      const lines = text.split('\n')
+      const headers = lines[0].split(',').map(h => h.trim())
+      
+      const data = lines.slice(1).map(line => {
+        const values = line.split(',').map(v => v.trim())
+        const guest: Guest = {
+          name: values[headers.indexOf('name')] || '',
+          pickupLocation: values[headers.indexOf('pickupLocation')] || '',
+          numberOfGuests: parseInt(values[headers.indexOf('numberOfGuests')] || '1', 10),
+          arrivalDate: values[headers.indexOf('arrivalDate')] || '',
+          arrivalTime: values[headers.indexOf('arrivalTime')] || '',
+        }
+        return guest
+      })
+
+      setCsvData(data)
+      setSelectedCsvFile(file.name)
+      setCurrentStep("review")
+    }
+    reader.readAsText(file)
+  }
+
+  const resetWorkflow = () => {
+    setCsvData([])
+    setGuestData(null)
+    setDriverAssignments({})
+    setLocationTimings([])
+    setDriverCapacity({ maxPassengers: 4 })
+    setDrivers([])
+    setItinerary([])
+    setSelectedCsvFile(null)
+    setCurrentStep("upload")
+  }
+
+  const value = {
+    currentStep,
+    setCurrentStep,
+    csvData,
+    setCsvData,
+    selectedFile,
+    setSelectedFile,
+    selectedCsvFile,
+    setSelectedCsvFile,
+    guestData,
+    setGuestData,
+    driverAssignments,
+    setDriverAssignments,
+    locationTimings,
+    setLocationTimings,
+    driverCapacity,
+    setDriverCapacity,
+    drivers,
+    setDrivers,
+    itinerary,
+    setItinerary,
+    savedCsvFiles,
+    handleFileUpload,
+    resetWorkflow,
+  }
 
   return (
-    <WorkflowContext.Provider
-      value={{
-        currentStep,
-        setCurrentStep,
-        csvData,
-        setCsvData,
-        guestData, // Expose guestData
-        setGuestData, // Expose setGuestData
-        selectedFile,
-        setSelectedFile,
-        selectedCsvFile,
-        setSelectedCsvFile, // Keep this setter
-        locationTimings,
-        setLocationTimings,
-        drivers,
-        setDrivers,
-        itinerary,
-        setItinerary,
-        
-        // Persistence values
-        savedCsvFiles,
-        loadSavedState,
-        resetWorkflow,
-      }}
-    >
+    <WorkflowContext.Provider value={value}>
       {children}
     </WorkflowContext.Provider>
   )

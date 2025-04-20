@@ -30,7 +30,8 @@ const nextConfig = {
   env: {
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
     GOOGLE_DRIVE_API_KEY: process.env.GOOGLE_DRIVE_API_KEY
-  }
+  },
+  pagesDirectory: false
 }
 
 if (userConfig) {

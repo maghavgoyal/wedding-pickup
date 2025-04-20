@@ -11,10 +11,17 @@ export interface GuestData {
   arrivalTime: string;
   numberOfGuests: number;
   driveLink: string;
+  hasIdProof?: boolean;
 }
 
 // Get environment variables
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+const GOOGLE_DRIVE_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY;
+
+// Validate API keys
+if (!GOOGLE_DRIVE_API_KEY) {
+  throw new Error('NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY environment variable is not set');
+}
 
 // Initialize Gemini if API key is available
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
@@ -41,6 +48,58 @@ const logger = {
   }
 };
 
+export function parseCSVData(csvData: string): GuestData[] {
+  logger.group('CSV Parsing');
+  
+  try {
+    const lines = csvData.split('\n');
+    logger.info(`Found ${lines.length} lines in CSV`);
+    
+    const headers = lines[0].split(',').map(header => header.trim().replace(/^"(.*)"$/, '$1'));
+    logger.info('CSV Headers:', headers);
+    
+    // Find the indexes of the columns we care about
+    const nameIndex = headers.indexOf('Name');
+    const phoneIndex = headers.indexOf('Phone Number');
+    const driveLinkIndex = headers.indexOf('Drive link');
+    const hashIndex = headers.indexOf('Hash');
+    
+    logger.info('Column Indexes:', { nameIndex, phoneIndex, driveLinkIndex, hashIndex });
+    
+    if (nameIndex === -1 || phoneIndex === -1 || driveLinkIndex === -1 || hashIndex === -1) {
+      throw new Error('CSV must contain Name, Phone Number, Drive link, and Hash columns');
+    }
+    
+    const guests = lines.slice(1).map((line, index) => {
+      const values = line.split(',').map(value => value.trim().replace(/^"(.*)"$/, '$1'));
+      
+      const guest: GuestData = {
+        id: (index + 1).toString(),
+        hash: values[hashIndex] || '',
+        name: values[nameIndex] || '',
+        email: '',
+        phone: values[phoneIndex] || '',
+        pickupLocation: '',
+        arrivalDate: '',
+        arrivalTime: '',
+        numberOfGuests: 1,
+        driveLink: values[driveLinkIndex] || '',
+      };
+
+      logger.info(`Guest ${index + 1}:`, guest);
+      return guest;
+    });
+
+    logger.success(`Parsed ${guests.length} guests successfully`);
+    logger.groupEnd();
+    return guests;
+  } catch (err) {
+    logger.error('Failed to parse CSV', err);
+    logger.groupEnd();
+    throw err;
+  }
+}
+
 // Return only fileId and mimeType, as downloadUrl is not reliable for server-side fetch
 async function getDirectFileUrl(parentFolderId: string): Promise<{ fileId: string; mimeType: string } | null> {
   logger.group('Google Drive File Lookup');
@@ -48,30 +107,71 @@ async function getDirectFileUrl(parentFolderId: string): Promise<{ fileId: strin
   try {
     logger.info('Looking up Tickets folder in:', parentFolderId);
     
-    // Call our API route to list files
-    const response = await fetch(`/api/drive?action=listFiles&parentFolderId=${parentFolderId}`);
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`Failed to fetch files: ${error.error || response.statusText}`);
+    // Step 1: Find the Tickets folder
+    // Note: Using name contains to handle case sensitivity
+    const folderListUrl = `https://www.googleapis.com/drive/v3/files?q=name contains 'Tickets' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id,name,mimeType)&key=${GOOGLE_DRIVE_API_KEY}`;
+    logger.info('Searching for Tickets folder...');
+    logger.info('API URL:', folderListUrl);
+    
+    const folderResponse = await fetch(folderListUrl, {
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    
+    if (!folderResponse.ok) {
+      const errorText = await folderResponse.text();
+      throw new Error(`Failed to fetch Tickets folder: ${folderResponse.statusText} (${folderResponse.status})\n${errorText}`);
     }
 
-    const data = await response.json();
-    const files = data.files || [];
+    const folderData = await folderResponse.json();
+    logger.info('Folder search result:', folderData);
     
-    if (files.length === 0) {
-      logger.warn('No files found in Tickets folder');
+    const ticketsFolderId = folderData.files?.[0]?.id;
+    if (!ticketsFolderId) {
+      logger.warn('No Tickets folder found in the parent folder');
       logger.groupEnd();
       return null;
     }
+    
+    logger.success('Found Tickets folder:', ticketsFolderId);
 
-    const firstFile = files[0];
+    // Step 2: Look for files in the Tickets folder
+    // Only request necessary fields: id, name, mimeType
+    const filesListUrl = `https://www.googleapis.com/drive/v3/files?q='${ticketsFolderId}' in parents and (mimeType contains 'image/' or mimeType='application/pdf') and trashed=false&fields=files(id,name,mimeType)&orderBy=createdTime desc&key=${GOOGLE_DRIVE_API_KEY}`;
+    logger.info('Looking for ticket files in Tickets folder...');
+    logger.info('API URL:', filesListUrl);
+    
+    const filesResponse = await fetch(filesListUrl, {
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    
+    if (!filesResponse.ok) {
+      const errorText = await filesResponse.text();
+      throw new Error(`Failed to fetch ticket files: ${filesResponse.statusText} (${filesResponse.status})\n${errorText}`);
+    }
+
+    const filesData = await filesResponse.json();
+    logger.info('Files in Tickets folder:', filesData);
+    
+    const firstFile = filesData.files?.[0];
+    // Check only for id and mimeType
+    if (!firstFile?.id || !firstFile?.mimeType) {
+      logger.warn('No ticket files found in Tickets folder or file missing required info');
+      logger.groupEnd();
+      return null;
+    }
+    
     logger.success('Found ticket file:', { 
       id: firstFile.id, 
       type: firstFile.mimeType, 
       name: firstFile.name,
     });
     logger.groupEnd();
-    return { fileId: firstFile.id!, mimeType: firstFile.mimeType! };
+    // Return only fileId and mimeType
+    return { fileId: firstFile.id, mimeType: firstFile.mimeType };
 
   } catch (err) {
     logger.error('Failed to get file URL', err);
@@ -94,19 +194,30 @@ async function parseImageTicketWithGemini(fileId: string, mimeType: string): Pro
     if (!genAI) {
       throw new Error('Gemini API not initialized');
     }
-
-    // Step 1: Download image using our API route
-    const response = await fetch(`/api/drive?action=getFile&fileId=${fileId}`);
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`Failed to download image: ${error.error || response.statusText}`);
+    if (!GOOGLE_DRIVE_API_KEY) {
+      throw new Error('Google Drive API Key not available');
     }
 
-    const { data: base64Data } = await response.json();
+    // Step 1: Download image using Google Drive API
+    const downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${GOOGLE_DRIVE_API_KEY}`;
+    logger.info('Fetching image content from API:', downloadUrl);
+    
+    const imageResponse = await fetch(downloadUrl);
+    if (!imageResponse.ok) {
+      let errorBody = '';
+      try {
+        errorBody = await imageResponse.text();
+      } catch (e) { /* Ignore */ }
+      throw new Error(`Failed to download image from Drive API: ${imageResponse.statusText} (Status: ${imageResponse.status}). Body: ${errorBody}`);
+    }
+
     logger.success('Image content fetched successfully');
+    const imageBuffer = await imageResponse.arrayBuffer();
+    const base64Data = Buffer.from(imageBuffer).toString('base64');
     logger.info('Image converted to base64');
 
     // Step 2: Send base64 data to Gemini
+    // Use the recommended gemini-1.5-flash model
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     logger.info('Sending image data to Gemini (model: gemini-1.5-flash)...');
     
@@ -160,24 +271,35 @@ async function parsePdfTicketWithGemini(fileId: string): Promise<any> {
     if (!genAI) {
       throw new Error('Gemini API not initialized');
     }
-
-    // Step 1: Download PDF using our API route
-    const response = await fetch(`/api/drive?action=getFile&fileId=${fileId}`);
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`Failed to download PDF: ${error.error || response.statusText}`);
+     if (!GOOGLE_DRIVE_API_KEY) {
+      throw new Error('Google Drive API Key not available');
     }
 
-    const { data: base64Data } = await response.json();
+    // Step 1: Download PDF using Google Drive API
+    const downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${GOOGLE_DRIVE_API_KEY}`;
+    logger.info('Fetching PDF content from API:', downloadUrl);
+    
+    const pdfResponse = await fetch(downloadUrl);
+    if (!pdfResponse.ok) {
+      let errorBody = '';
+      try {
+        errorBody = await pdfResponse.text();
+      } catch (e) { /* Ignore */ }
+      throw new Error(`Failed to download PDF from Drive API: ${pdfResponse.statusText} (Status: ${pdfResponse.status}). Body: ${errorBody}`);
+    }
+
     logger.success('PDF content fetched successfully');
+    const pdfBuffer = await pdfResponse.arrayBuffer();
+    const base64Data = Buffer.from(pdfBuffer).toString('base64');
     logger.info('PDF converted to base64');
 
     // Step 2: Send base64 data to Gemini
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    // Use the recommended gemini-1.5-flash model
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' }); 
     logger.info('Sending PDF data to Gemini (model: gemini-1.5-flash)...');
     
     const result = await model.generateContent([
-      "Extract the following information from this ticket/boarding pass: arrival date, arrival time, arrival location, flight/train/bus number, and number of travelers. Return the data in JSON format with these exact keys: arrivalDate, arrivalTime, pickupLocation, flightNumber, trainNumber, busNumber, numberOfGuests. If a value is not present, return null for that key.",
+      "You are being provided with a PDF document which is likely a travel ticket or boarding pass. Extract the following information: arrival date, arrival time, arrival location, flight/train/bus number, and number of travelers. Return the data in JSON format with these exact keys: arrivalDate, arrivalTime, pickupLocation, flightNumber, trainNumber, busNumber, numberOfGuests. If a value is not present, return null for that key.",
       {
         inlineData: {
           mimeType: 'application/pdf',
@@ -218,6 +340,67 @@ async function parsePdfTicketWithGemini(fileId: string): Promise<any> {
   }
 }
 
+// Add this function after getDirectFileUrl
+async function checkIdProof(parentFolderId: string): Promise<boolean> {
+  logger.group('ID Proof Check');
+  
+  try {
+    logger.info('Looking up IDs folder in:', parentFolderId);
+    
+    // Step 1: Find the IDs folder
+    const folderListUrl = `https://www.googleapis.com/drive/v3/files?q=name contains 'IDs' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id,name,mimeType)&key=${GOOGLE_DRIVE_API_KEY}`;
+    logger.info('Searching for IDs folder...');
+    
+    const folderResponse = await fetch(folderListUrl, {
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    
+    if (!folderResponse.ok) {
+      throw new Error(`Failed to fetch IDs folder: ${folderResponse.statusText}`);
+    }
+
+    const folderData = await folderResponse.json();
+    const idsFolderId = folderData.files?.[0]?.id;
+    
+    if (!idsFolderId) {
+      logger.warn('No IDs folder found');
+      logger.groupEnd();
+      return false;
+    }
+    
+    logger.success('Found IDs folder:', idsFolderId);
+
+    // Step 2: Look for files in the IDs folder
+    const filesListUrl = `https://www.googleapis.com/drive/v3/files?q='${idsFolderId}' in parents and (mimeType contains 'image/' or mimeType='application/pdf') and trashed=false&fields=files(id)&key=${GOOGLE_DRIVE_API_KEY}`;
+    logger.info('Looking for ID files...');
+    
+    const filesResponse = await fetch(filesListUrl, {
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    
+    if (!filesResponse.ok) {
+      throw new Error(`Failed to fetch ID files: ${filesResponse.statusText}`);
+    }
+
+    const filesData = await filesResponse.json();
+    const hasFiles = filesData.files && filesData.files.length > 0;
+    
+    logger.success(`ID check result: ${hasFiles ? 'Found' : 'Not found'}`);
+    logger.groupEnd();
+    return hasFiles;
+
+  } catch (err) {
+    logger.error('Failed to check ID proof:', err);
+    logger.groupEnd();
+    return false;
+  }
+}
+
+// Update the processGuestTickets function to include ID proof check
 export async function processGuestTickets(guest: GuestData): Promise<GuestData> {
   try {
     logger.group(`Processing Guest: ${guest.name}`);
@@ -238,68 +421,42 @@ export async function processGuestTickets(guest: GuestData): Promise<GuestData> 
     }
     logger.info('Extracted folder ID:', parentFolderId);
 
-    logger.info('Fetching ticket file information...');
-    let ticketDetails: any = null;
-    try {
-      // Get only fileId and mimeType
-      const fileInfo = await getDirectFileUrl(parentFolderId);
-      if (!fileInfo) {
-        logger.warn(`No ticket files found for guest ${guest.name} - this is expected if tickets have not been uploaded yet`);
-        logger.groupEnd();
-        return guest;
-      }
-      
-      // Destructure fileId and mimeType
-      const { fileId, mimeType } = fileInfo;
-      logger.info('Processing file ID:', { fileId, mimeType });
+    // Check for ID proof in parallel with ticket processing
+    const [ticketDetails, hasIdProof] = await Promise.all([
+      getDirectFileUrl(parentFolderId).then(async fileInfo => {
+        if (!fileInfo) return null;
+        const { fileId, mimeType } = fileInfo;
+        return mimeType.startsWith('image/') 
+          ? parseImageTicketWithGemini(fileId, mimeType)
+          : mimeType === 'application/pdf'
+          ? parsePdfTicketWithGemini(fileId)
+          : null;
+      }),
+      checkIdProof(parentFolderId)
+    ]);
 
-      // Pass fileId and mimeType to parsing functions
-      if (mimeType.startsWith('image/')) {
-        logger.info('Processing as image...');
-        ticketDetails = await parseImageTicketWithGemini(fileId, mimeType);
-      } else if (mimeType === 'application/pdf') {
-        logger.info('Processing as PDF...');
-        ticketDetails = await parsePdfTicketWithGemini(fileId);
-      } else {
-        logger.warn(`Unsupported file type (${mimeType}) found for guest ${guest.name} - skipping ticket processing`);
-      }
+    // Update guest data with ID proof status
+    const updatedGuest = {
+      ...guest,
+      hasIdProof
+    };
 
-      if (ticketDetails) {
-        logger.success(`✨ Successfully found and processed ticket for ${guest.name}`);
-        logger.info('Extracted ticket details:', ticketDetails);
-        // Update guest with ticket details
-        guest.arrivalDate = ticketDetails.arrivalDate || guest.arrivalDate;
-        guest.arrivalTime = ticketDetails.arrivalTime || guest.arrivalTime;
-        guest.pickupLocation = ticketDetails.pickupLocation || guest.pickupLocation;
-        guest.numberOfGuests = ticketDetails.numberOfGuests || guest.numberOfGuests;
-        logger.info('Updated guest data:', guest);
-      } else {
-        logger.warn(`Could not extract ticket details for guest ${guest.name} - keeping default values`);
-      }
-    } catch (err) {
-      logger.error(`Error processing ticket for guest ${guest.name}:`, err);
-      if (err instanceof Error) {
-        logger.error('Error details:', {
-          message: err.message,
-          stack: err.stack,
-          cause: err.cause
-        });
-      }
+    // Update with ticket details if available
+    if (ticketDetails) {
+      updatedGuest.pickupLocation = ticketDetails.pickupLocation || '';
+      updatedGuest.arrivalDate = ticketDetails.arrivalDate || '';
+      updatedGuest.arrivalTime = ticketDetails.arrivalTime || '';
+      updatedGuest.numberOfGuests = ticketDetails.numberOfGuests || 1;
     }
 
+    logger.success(`Processed guest ${guest.name}:`, updatedGuest);
     logger.groupEnd();
-    return guest;
+    return updatedGuest;
+
   } catch (err) {
-    logger.error(`Error in processGuestTickets for guest ${guest.name}:`, err);
-    if (err instanceof Error) {
-      logger.error('Error details:', {
-        message: err.message,
-        stack: err.stack,
-        cause: err.cause
-      });
-    }
+    logger.error(`Failed to process guest ${guest.name}:`, err);
     logger.groupEnd();
-    return guest;
+    return { ...guest, hasIdProof: false };
   }
 }
 
@@ -407,56 +564,4 @@ export async function testDriveFolder(folderUrl: string) {
     }
   }
   logger.groupEnd();
-}
-
-export function parseCSVData(csvData: string): GuestData[] {
-  logger.group('CSV Parsing');
-  
-  try {
-    const lines = csvData.split('\n');
-    logger.info(`Found ${lines.length} lines in CSV`);
-    
-    const headers = lines[0].split(',').map(header => header.trim().replace(/^"(.*)"$/, '$1'));
-    logger.info('CSV Headers:', headers);
-    
-    // Find the indexes of the columns we care about
-    const nameIndex = headers.indexOf('Name');
-    const phoneIndex = headers.indexOf('Phone Number');
-    const driveLinkIndex = headers.indexOf('Drive link');
-    const hashIndex = headers.indexOf('Hash');
-    
-    logger.info('Column Indexes:', { nameIndex, phoneIndex, driveLinkIndex, hashIndex });
-    
-    if (nameIndex === -1 || phoneIndex === -1 || driveLinkIndex === -1 || hashIndex === -1) {
-      throw new Error('CSV must contain Name, Phone Number, Drive link, and Hash columns');
-    }
-    
-    const guests = lines.slice(1).map((line: string, index: number) => {
-      const values = line.split(',').map(value => value.trim().replace(/^"(.*)"$/, '$1'));
-      
-      const guest: GuestData = {
-        id: (index + 1).toString(),
-        hash: values[hashIndex] || '',
-        name: values[nameIndex] || '',
-        email: '',
-        phone: values[phoneIndex] || '',
-        pickupLocation: '',
-        arrivalDate: '',
-        arrivalTime: '',
-        numberOfGuests: 1,
-        driveLink: values[driveLinkIndex] || '',
-      };
-
-      logger.info(`Guest ${index + 1}:`, guest);
-      return guest;
-    });
-
-    logger.success(`Parsed ${guests.length} guests successfully`);
-    logger.groupEnd();
-    return guests;
-  } catch (err) {
-    logger.error('Failed to parse CSV', err);
-    logger.groupEnd();
-    throw err;
-  }
 } 

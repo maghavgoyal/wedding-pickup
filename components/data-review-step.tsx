@@ -20,6 +20,14 @@ export const DataReviewStep = () => {
   // const handleTimeChange = (...) => { ... }
   // const handleCapacityChange = (...) => { ... }
 
+  if (!csvData || csvData.length === 0) {
+    return (
+      <div className="text-center p-4">
+        <p className="text-gray-500">No guest data loaded</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="animate-fade-in"> {/* Added fade-in animation wrapper */}
@@ -35,34 +43,36 @@ export const DataReviewStep = () => {
                 <TableHeader className="bg-gray-50 sticky top-0">
                   <TableRow>
                     <TableHead>Name</TableHead>
-                    {/* <TableHead>Email</TableHead> */}
                     <TableHead>Phone</TableHead>
                     <TableHead>Pickup Location</TableHead>
                     <TableHead>Arrival Date</TableHead>
                     <TableHead>Arrival Time</TableHead>
                     <TableHead className="text-right">Guests</TableHead>
+                    <TableHead>ID Proof</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {csvData.length > 0 ? (
-                    csvData.map((guest, index) => (
-                      <TableRow key={index} className="hover:bg-gray-50/50">
-                        <TableCell className="font-medium">{guest.name || "-"}</TableCell>
-                        {/* <TableCell>{guest.email || "-"}</TableCell> */}
-                        <TableCell>{guest.phone || "-"}</TableCell>
-                        <TableCell>{guest.pickupLocation || "-"}</TableCell>
-                        <TableCell>{guest.arrivalDate || "-"}</TableCell>
-                        <TableCell>{guest.arrivalTime || "-"}</TableCell>
-                        <TableCell className="text-right">{guest.numberOfGuests ?? 1}</TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground py-10">
-                        No guest data loaded. Please go back and upload a CSV.
+                  {csvData.map((guest, index) => (
+                    <TableRow key={guest.id || index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <TableCell className="font-medium">{guest.name || "-"}</TableCell>
+                      <TableCell>{guest.phone || "-"}</TableCell>
+                      <TableCell>{guest.pickupLocation || "-"}</TableCell>
+                      <TableCell>{guest.arrivalDate || "-"}</TableCell>
+                      <TableCell>{guest.arrivalTime || "-"}</TableCell>
+                      <TableCell className="text-right">{guest.numberOfGuests ?? 1}</TableCell>
+                      <TableCell>
+                        {guest.hasIdProof ? (
+                          <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                            Uploaded
+                          </span>
+                        ) : (
+                          <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                            Missing
+                          </span>
+                        )}
                       </TableCell>
                     </TableRow>
-                  )}
+                  ))}
                 </TableBody>
               </Table>
             </ScrollArea>
